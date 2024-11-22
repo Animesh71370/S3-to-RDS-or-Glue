@@ -1,0 +1,60 @@
+pipeline {
+    agent any
+    
+    environment {
+        // Set environment variables for your credentials and ECR URL
+        ECR_REPO = '343426788810.dkr.ecr.ap-south-1.amazonaws.com/s3-to-rds-or-glue'
+        GITHUB_REPO = 'https://github.com/Animesh71370/S3-to-RDS-or-Glue.git'  // Replace with your actual repository URL
+        AWS_REGION = 'ap-south-1'  // Replace with your region
+    }
+    
+    stages {
+        stage('Clone Repository') {
+            steps {
+                // Clone the repository using GitHub credentials stored in Jenkins
+                git credentialsId: 'github-jenkins-pat', url: "${GITHUB_REPO}", branch: 'main'
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                // Build the Docker image using the Dockerfile in the repository
+                sh 'docker build -t s3-to-rds-or-glue .'
+            }
+        }
+        
+        stage('Push to ECR') {
+            steps {
+                // Use AWS credentials securely for Docker push to ECR
+                withCredentials([string(credentialsId: 'aws-credentials', variable: 'AWS_ACCESS_KEY_ID'),
+                                 string(credentialsId: 'aws-credentials', variable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    sh '''
+                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO}
+                        docker tag s3-to-rds-or-glue:latest ${ECR_REPO}:latest
+                        docker push ${ECR_REPO}:latest
+                    '''
+                }
+            }
+        }
+        
+        stage('Initialize Terraform') {
+            steps {
+                // Initialize Terraform before applying
+                withCredentials([string(credentialsId: 'aws-credentials', variable: 'AWS_ACCESS_KEY_ID'),
+                                 string(credentialsId: 'aws-credentials', variable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    sh 'terraform init'
+                }
+            }
+        }
+
+        stage('Apply Terraform') {
+            steps {
+                // Use AWS credentials securely for Terraform operations
+                withCredentials([string(credentialsId: 'aws-credentials', variable: 'AWS_ACCESS_KEY_ID'),
+                                 string(credentialsId: 'aws-credentials', variable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    sh 'terraform apply -auto-approve'
+                }
+            }
+        }
+    }
+}
